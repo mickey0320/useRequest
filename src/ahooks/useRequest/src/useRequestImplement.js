@@ -7,7 +7,7 @@ import useUnmount from "../../useUnmount";
 import useMemorizedFn from "../../useMemorizedFn";
 import Fetch from "./Fetch";
 
-function useRequestImplement(service, options) {
+function useRequestImplement(service, options, plugins) {
   const serviceRef = useLatest(service);
   const update = useUpdate();
   const fetchInstanceOptions = {
@@ -15,8 +15,19 @@ function useRequestImplement(service, options) {
     ...options,
   };
   const fetchInstance = useCreation(() => {
-    return new Fetch(serviceRef, update, fetchInstanceOptions);
+    const initStates = plugins
+      .map((p) => p.onInit?.(fetchInstanceOptions))
+      .filter(Boolean);
+    return new Fetch(
+      serviceRef,
+      update,
+      fetchInstanceOptions,
+      Object.assign({}, ...initStates)
+    );
   }, []);
+  fetchInstance.pluginImpls = plugins.map((p) =>
+    p(fetchInstance, fetchInstanceOptions)
+  );
 
   useMount(() => {
     if (!fetchInstanceOptions.manual) {

@@ -1,10 +1,11 @@
 class Fetch {
-  constructor(serviceRef, render, options) {
+  constructor(serviceRef, render, options, initState) {
     this.state = {
       loading: false,
-      data: null,
-      error: null,
-      params: null,
+      data: undefined,
+      error: undefined,
+      params: undefined,
+      ...initState,
     };
     this.serviceRef = serviceRef;
     this.render = render;
@@ -28,15 +29,23 @@ class Fetch {
   async runAsync(params) {
     this.count += 1;
     const currentCount = this.count;
+    const state = this.runImplHandler("onBefore", params);
     this.setState({
       loading: true,
       params,
+      ...state,
     });
+    this.options.onBefore?.(params);
     try {
-      if (this.options.onBefore) {
-        this.options.onBefore(params);
+      const { servicePromise } = this.runImplHandler(
+        "onRequest",
+        this.serviceRef.current,
+        params
+      );
+      if (!servicePromise) {
+        servicePromise = this.serviceRef.current(...params);
       }
-      const data = await this.serviceRef.current(...params);
+      const data = await servicePromise;
       if (this.count !== currentCount) {
         return new Promise(() => {});
       }
@@ -45,12 +54,10 @@ class Fetch {
         loading: false,
         error: undefined,
       });
-      if (this.options.onSuccess) {
-        this.options.onSuccess(data, params);
-      }
-      if (this.options.onFinally) {
-        this.options.onFinally(params, data, undefined);
-      }
+      this.options.onSuccess?.(data, params);
+      this.runImplHandler("onSuccess", params, data);
+      this.options.onFinally?.(params, data, undefined);
+      this.runImplHandler("onFinally", params, data);
     } catch (error) {
       this.setState({
         data: undefined,
@@ -60,12 +67,10 @@ class Fetch {
       if (this.count !== currentCount) {
         return new Promise(() => {});
       }
-      if (this.options.onError) {
-        this.options.onError(error, params);
-      }
-      if (this.options.onFinally) {
-        this.options.onFinally(params, undefined, error);
-      }
+      this.options.onError?.(error, params);
+      this.runImplHandler("onError", params, error);
+      this.options.onFinally?.(params, undefined, error);
+      this.runImplHandler("onFinally", params, error);
 
       return Promise.reject(error);
     }
@@ -84,9 +89,15 @@ class Fetch {
   cancel() {
     this.count += 1;
     this.setState({ loading: false });
-    if (this.options.onCancel) {
-      this.options.onCancel();
-    }
+    this.options.onCancel?.();
+    this.runImplHandler("onCancel");
+  }
+  runImplHandler(event, ...rest) {
+    const result = this.pluginImpls
+      .map((impl) => impl[event]?.(...rest))
+      .filter(Boolean);
+
+    return Object.assign({}, ...result);
   }
 }
 
